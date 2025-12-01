@@ -4,24 +4,26 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
 import { toast } from 'sonner@2.0.3';
-import { atletasService } from '../api';
-import { Shield, FileText, CheckCircle, XCircle, Clock, Trash2 } from 'lucide-react';
+import { certificacionesService } from '../api';
+import { Shield, FileText, CheckCircle, XCircle, Clock, Trash2, User } from 'lucide-react';
 
 type Estado = 'pendiente' | 'aprobada' | 'rechazada';
 
-interface CertAtleta {
+interface CertEntrenador {
   id: number;
-  atleta?: number;
-  atleta_nombre?: string;
-  tipo: string;
+  entrenador?: number;
+  entrenador_nombre?: string;
+  entrenador_email?: string;
   nombre: string;
-  fecha_emision: string;
+  institucion: string;
+  fecha_obtencion: string;
   fecha_vencimiento?: string | null;
-  notas?: string;
-  archivo_url?: string;
-  created_at?: string;
+  descripcion?: string;
+  archivo?: string;
+  archivo_url?: string | null;
   estado?: string;
   comentario_admin?: string;
+  created_at?: string;
 }
 
 const normalizeEstado = (estado?: string): Estado =>
@@ -50,21 +52,21 @@ const EstadoBadge: React.FC<{ estado?: string }> = ({ estado }) => {
   );
 };
 
-export const ValidacionCertificaciones: React.FC = () => {
-  const [certs, setCerts] = useState<CertAtleta[]>([]);
+export const ValidacionCertificacionesEntrenadores: React.FC = () => {
+  const [certs, setCerts] = useState<CertEntrenador[]>([]);
   const [filtro, setFiltro] = useState<Estado | 'todas'>('pendiente');
 
   const safeMsg = (err: any, fallback: string) =>
     typeof err === 'string' ? err : err?.message || err?.detail || err?.error || fallback;
 
   const loadCertificaciones = async () => {
-    const resp = await atletasService.listarCertificaciones();
+    const resp = await certificacionesService.listar();
     if (resp.success) {
-      const arr: CertAtleta[] = Array.isArray(resp.data) ? resp.data : [];
+      const arr: CertEntrenador[] = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
       setCerts(arr.map((c: any) => ({ ...c, estado: normalizeEstado(c.estado) })));
     } else {
       setCerts([]);
-      toast.error(safeMsg(resp.error, 'No se pudieron cargar las certificaciones'));
+      toast.error(safeMsg(resp.error, 'No se pudieron cargar las certificaciones de entrenadores'));
     }
   };
 
@@ -81,20 +83,20 @@ export const ValidacionCertificaciones: React.FC = () => {
 
   const filtradas = certs.filter((c) => (filtro === 'todas' ? true : normalizeEstado(c.estado) === filtro));
 
-  const actualizar = async (cert: CertAtleta, estado: Estado) => {
+  const actualizar = async (cert: CertEntrenador, estado: Estado) => {
     const comentario_admin = window.prompt('Motivo (opcional):', '') || '';
-    const resp = await atletasService.actualizarCertificacion(cert.id, { estado, comentario_admin });
+    const resp = await certificacionesService.actualizar(cert.id, { estado, comentario_admin });
     if (resp.success) {
       toast.success(`Certificación ${estado === 'aprobada' ? 'aprobada' : 'rechazada'}`);
       setCerts((prev) => prev.map((c) => (c.id === cert.id ? { ...c, estado, comentario_admin } : c)));
     } else {
-      toast.error(safeMsg(resp.error, 'No se pudo actualizar'));
+      toast.error(safeMsg(resp.error, 'No se pudo actualizar la certificación'));
     }
   };
 
   const eliminar = async (id: number) => {
-    if (!confirm('¿Eliminar este certificado de atleta?')) return;
-    const resp = await atletasService.eliminarCertificacion(id);
+    if (!confirm('¿Eliminar este certificado de entrenador?')) return;
+    const resp = await certificacionesService.eliminar(id);
     if (resp.success) {
       setCerts((prev) => prev.filter((c) => c.id !== id));
       toast.success('Certificación eliminada');
@@ -109,9 +111,9 @@ export const ValidacionCertificaciones: React.FC = () => {
         <div>
           <h2 className="flex items-center gap-2">
             <Shield className="w-6 h-6 text-yellow-500" />
-            Validación de Certificaciones (Atletas)
+            Validación de Certificaciones (Entrenadores)
           </h2>
-          <p className="text-gray-600 text-sm">Valida certificados subidos por apoderados para sus atletas</p>
+          <p className="text-gray-600 text-sm">Valida certificados subidos por los entrenadores</p>
         </div>
         <Button variant="outline" size="sm" onClick={loadCertificaciones}>
           Refrescar
@@ -141,21 +143,24 @@ export const ValidacionCertificaciones: React.FC = () => {
                 <div className="flex items-start justify-between">
                   <div>
                     <h4 className="font-bold">{c.nombre}</h4>
-                    <p className="text-xs text-gray-500 capitalize">{c.tipo}</p>
-                    {c.atleta_nombre && <p className="text-xs text-gray-600">Atleta: {c.atleta_nombre}</p>}
+                    <p className="text-xs text-gray-500 capitalize">{c.institucion}</p>
+                    <p className="text-xs text-gray-600 flex items-center gap-1 mt-1">
+                      <User className="w-3 h-3" />
+                      {c.entrenador_nombre || c.entrenador_email || `Entrenador #${c.entrenador}`}
+                    </p>
                   </div>
                   <EstadoBadge estado={c.estado} />
                 </div>
                 <div className="text-xs text-gray-600">
-                  Emisión: {c.fecha_emision ? new Date(c.fecha_emision).toLocaleDateString('es-CL') : '-'}
+                  Obtención: {c.fecha_obtencion ? new Date(c.fecha_obtencion).toLocaleDateString('es-CL') : '-'}
                 </div>
                 {c.fecha_vencimiento && (
                   <p className="text-xs text-gray-600">
                     Vence: {new Date(c.fecha_vencimiento).toLocaleDateString('es-CL')}
                   </p>
                 )}
-                {c.notas && <p className="text-sm text-gray-700">{c.notas}</p>}
-                <div className="flex items-center gap-2">
+                {c.descripcion && <p className="text-sm text-gray-700">{c.descripcion}</p>}
+                <div className="flex items-center gap-2 flex-wrap">
                   {c.archivo_url && (
                     <Button variant="outline" size="sm" onClick={() => window.open(c.archivo_url as string, '_blank', 'noopener')}>
                       <FileText className="w-4 h-4 mr-1" /> Ver archivo
@@ -182,7 +187,7 @@ export const ValidacionCertificaciones: React.FC = () => {
                     </>
                   ) : (
                     <Badge variant="outline" className="text-xs">
-                      {(c as any).comentario_admin || 'Sin comentario'}
+                      {c.comentario_admin || 'Sin comentario'}
                     </Badge>
                   )}
                   <Button variant="ghost" size="sm" className="text-red-600" onClick={() => eliminar(c.id)}>

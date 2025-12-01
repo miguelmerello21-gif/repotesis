@@ -1,0 +1,314 @@
+import React, { useState, useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { Button } from './ui/button';
+import { Badge } from './ui/badge';
+import { DollarSign, CreditCard, Calendar, CheckCircle, AlertCircle, Shield, RefreshCcw, Clock } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { toast } from 'sonner@2.0.3';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
+import { pagosService } from '../api';
+import { ProcesandoWebpay } from './ProcesandoWebpay';
+
+interface PagoOnlineObligacion {
+  id: string | number;
+  pago: number | string;
+  pago_titulo: string;
+  pago_fecha_vencimiento?: string;
+  atleta: number | string;
+  atleta_nombre: string;
+  monto: number;
+  estado: 'pendiente' | 'pagado' | 'vencido';
+  fecha_pago?: string;
+  metodo_pago?: string;
+}
+
+export const MisPagos: React.FC = () => {
+  const { user } = useAuth();
+  const [obligaciones, setObligaciones] = useState<PagoOnlineObligacion[]>([]);
+  const [showPasarela, setShowPasarela] = useState(false);
+  const [pagoSeleccionado, setPagoSeleccionado] = useState<PagoOnlineObligacion | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [procesandoWebpay, setProcesandoWebpay] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      loadObligaciones();
+    }
+    const isWebpayReturn = typeof window !== 'undefined' && window.location.pathname.includes('pagos-online-retorno');
+    if (isWebpayReturn) {
+      const params = new URLSearchParams(window.location.search);
+      const token = params.get('token_ws');
+      if (token) {
+        confirmarWebpay(token);
+      }
+      params.delete('token_ws');
+      const newUrl = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
+      window.history.replaceState({}, '', newUrl);
+    }
+  }, [user]);
+
+  const loadObligaciones = async () => {
+    const resp = await pagosService.listarObligacionesPagoOnline?.();
+    if (resp?.success && Array.isArray(resp.data)) {
+      setObligaciones(resp.data as any);
+    } else {
+      toast.error(resp?.error?.message || 'No se pudieron cargar los pagos online');
+    }
+  };
+
+  const handlePagar = (pago: PagoOnlineObligacion) => {
+    setPagoSeleccionado(pago);
+    setShowPasarela(true);
+  };
+
+  const procesarPago = async () => {
+    if (!pagoSeleccionado) return;
+    setLoading(true);
+    const resp = await pagosService.pagarObligacionPagoOnline?.(pagoSeleccionado.id, { metodo_pago: 'manual' });
+    if (resp?.success) {
+      toast.success('Pago registrado (manual)');
+      setShowPasarela(false);
+      setPagoSeleccionado(null);
+      loadObligaciones();
+    } else {
+      toast.error(resp?.error?.message || 'No se pudo procesar el pago');
+    }
+    setLoading(false);
+  };
+
+  const descargarComprobante = () => {
+    toast.info('Descarga de comprobante no implementada aún');
+  };
+
+  const getEstadoBadge = (estado: PagoOnlineObligacion['estado']) => {
+    switch (estado) {
+      case 'pagado':
+        return <Badge className="bg-green-100 text-green-800"><CheckCircle className="w-3 h-3 mr-1" />Pagado</Badge>;
+      case 'vencido':
+        return <Badge className="bg-red-100 text-red-800"><AlertCircle className="w-3 h-3 mr-1" />Vencido</Badge>;
+      default:
+        return <Badge className="bg-yellow-100 text-yellow-800"><Calendar className="w-3 h-3 mr-1" />Pendiente</Badge>;
+    }
+  };
+
+  const pendientes = obligaciones.filter((p) => p.estado !== 'pagado');
+  const pagados = obligaciones.filter((p) => p.estado === 'pagado');
+  const totalPendiente = pendientes.reduce((sum, p) => sum + (Number(p.monto) || 0), 0);
+  const totalPagado = pagados.reduce((sum, p) => sum + (Number(p.monto) || 0), 0);
+
+  const iniciarWebpay = async () => {
+    if (!pagoSeleccionado) return;
+    setLoading(true);
+    const uniqueOrder = `po-${pagoSeleccionado.id}-${Date.now()}`;
+    const session = `sess-${user?.id || 'anon'}-${Date.now()}`;
+    const resp = await pagosService.iniciarWebpayPagoOnline?.(pagoSeleccionado.id, uniqueOrder, session);
+    if (resp?.success && resp.data?.url && resp.data?.token) {
+      setProcesandoWebpay(true);
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = resp.data.url;
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = 'token_ws';
+      input.value = resp.data.token;
+      form.appendChild(input);
+      document.body.appendChild(form);
+      form.submit();
+      return;
+    }
+    toast.error(resp?.error?.message || 'No se pudo iniciar Webpay');
+    setLoading(false);
+  };
+
+  const confirmarWebpay = async (token: string) => {
+    setProcesandoWebpay(true);
+    const resp = await pagosService.confirmarWebpayPagoOnline?.(token);
+    if (resp?.success) {
+      toast.success('Pago confirmado');
+      setShowPasarela(false);
+      setPagoSeleccionado(null);
+      loadObligaciones();
+    } else {
+      toast.error(resp?.error?.message || 'No se pudo confirmar el pago');
+    }
+    setProcesandoWebpay(false);
+  };
+
+  return (
+    <>
+      {procesandoWebpay && <ProcesandoWebpay />}
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="mb-8">
+        <h1 className="mb-2 flex items-center gap-2">
+          <DollarSign className="w-8 h-8 text-yellow-600" />
+          Mis Pagos Online
+        </h1>
+        <p className="text-gray-600">
+          Revisa y paga los cobros asociados a tus atletas.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+        <Card className="border-l-4 border-red-400">
+          <CardContent className="p-4">
+            <div className="text-sm text-gray-600">Pagos Pendientes/Vencidos</div>
+            <div className="text-2xl text-red-600">{pendientes.length}</div>
+            <div className="text-sm text-gray-500">${totalPendiente.toLocaleString('es-CL')}</div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-l-4 border-green-400">
+          <CardContent className="p-4">
+            <div className="text-sm text-gray-600">Total Pagado</div>
+            <div className="text-2xl text-green-600">${totalPagado.toLocaleString('es-CL')}</div>
+            <div className="text-sm text-gray-500">{pagados.length} pagos</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="space-y-4">
+        {pendientes.length > 0 && (
+          <div>
+            <h3 className="mb-3 flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-red-600" />
+              Pagos Pendientes / Vencidos
+            </h3>
+            {pendientes.map((pago) => (
+              <PagoCard key={pago.id} pago={pago} onPagar={handlePagar} onDescargar={descargarComprobante} />
+            ))}
+          </div>
+        )}
+
+        <div>
+          <h3 className="mb-3 flex items-center gap-2 text-green-600">
+            <CheckCircle className="w-5 h-5" />
+            Historial de pagos
+          </h3>
+          {pagados.length === 0 ? (
+            <div className="text-sm text-gray-500 flex items-center gap-2">
+              <Clock className="w-4 h-4" />
+              Aún no registras pagos.
+            </div>
+          ) : (
+            pagados.map((pago) => (
+              <PagoCard key={pago.id} pago={pago} onPagar={handlePagar} onDescargar={descargarComprobante} />
+            ))
+          )}
+        </div>
+      </div>
+
+      <Dialog open={showPasarela} onOpenChange={setShowPasarela}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Shield className="w-5 h-5 text-green-600" />
+              Pago en línea (simulado)
+            </DialogTitle>
+            <DialogDescription>Registra el pago de manera segura</DialogDescription>
+          </DialogHeader>
+
+          {pagoSeleccionado && (
+            <div className="space-y-4">
+              <div className="bg-blue-50 p-4 rounded-lg">
+                <h3 className="mb-2">Detalle del Pago</h3>
+                <div className="space-y-1 text-sm">
+                  <p><strong>Cobro:</strong> {pagoSeleccionado.pago_titulo}</p>
+                  <p><strong>Atleta:</strong> {pagoSeleccionado.atleta_nombre}</p>
+                  {pagoSeleccionado.pago_fecha_vencimiento && (
+                    <p><strong>Vence:</strong> {new Date(pagoSeleccionado.pago_fecha_vencimiento).toLocaleDateString('es-CL')}</p>
+                  )}
+                  <p className="text-lg text-green-600 mt-2">
+                    <strong>Total: ${Number(pagoSeleccionado.monto).toLocaleString('es-CL')}</strong>
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Button
+                  onClick={iniciarWebpay}
+                  disabled={loading}
+                  className="w-full bg-green-600 hover:bg-green-700"
+                >
+                  {loading ? 'Redirigiendo...' : 'Pagar con Webpay'}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={procesarPago}
+                  disabled={loading}
+                  className="w-full"
+                >
+                  Marcar como pagado (manual)
+                </Button>
+              </div>
+
+              <p className="text-xs text-gray-500 text-center">
+                Usa Webpay para registrar el pago automáticamente o marca manual en caso de pago offline.
+              </p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
+const PagoCard: React.FC<{
+  pago: PagoOnlineObligacion;
+  onPagar: (pago: PagoOnlineObligacion) => void;
+  onDescargar: (pago: PagoOnlineObligacion) => void;
+}> = ({ pago, onPagar, onDescargar }) => {
+  const getEstadoBadge = (estado: PagoOnlineObligacion['estado']) => {
+    switch (estado) {
+      case 'pagado':
+        return <Badge className="bg-green-100 text-green-800"><CheckCircle className="w-3 h-3 mr-1" />Pagado</Badge>;
+      case 'vencido':
+        return <Badge className="bg-red-100 text-red-800"><AlertCircle className="w-3 h-3 mr-1" />Vencido</Badge>;
+      default:
+        return <Badge className="bg-yellow-100 text-yellow-800"><Calendar className="w-3 h-3 mr-1" />Pendiente</Badge>;
+    }
+  };
+
+  return (
+    <Card className="mb-3">
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between">
+          <div className="flex-1">
+            <div className="flex items-center gap-3 mb-2">
+              <h4 className="font-medium">{pago.pago_titulo}</h4>
+              {getEstadoBadge(pago.estado)}
+            </div>
+            <p className="text-sm text-gray-600 mb-1">{pago.atleta_nombre}</p>
+            <div className="text-sm text-gray-500 space-y-1">
+              {pago.pago_fecha_vencimiento && <p>Vencimiento: {new Date(pago.pago_fecha_vencimiento).toLocaleDateString('es-CL')}</p>}
+              {pago.fecha_pago && (
+                <p className="text-green-600">Pagado: {new Date(pago.fecha_pago).toLocaleDateString('es-CL')}</p>
+              )}
+              {pago.metodo_pago && <p>Método: {pago.metodo_pago}</p>}
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="text-2xl font-medium text-green-600 mb-2">
+              ${Number(pago.monto).toLocaleString('es-CL')}
+            </p>
+            {pago.estado === 'pagado' ? (
+              <Button size="sm" variant="outline" onClick={() => onDescargar(pago)}>
+                <RefreshCcw className="w-4 h-4 mr-1" />
+                Comprobante
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                onClick={() => onPagar(pago)}
+                className="bg-yellow-400 text-black hover:bg-yellow-500"
+              >
+                <CreditCard className="w-4 h-4 mr-1" />
+                Pagar
+              </Button>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+

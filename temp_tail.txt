@@ -1,0 +1,120 @@
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+
+        {notificacionesFiltradas.length === 0 && (
+          <Card>
+            <CardContent className="p-12 text-center">
+              <Bell className="w-16 h-16 mx-auto text-gray-300 mb-4" />
+              <p className="text-gray-500">
+                {filtro === 'noLeidas' 
+                  ? 'No tienes notificaciones sin leer'
+                  : 'No tienes notificaciones'
+                }
+              </p>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
+      {/* Dialog: Detalle de Notificación */}
+      <Dialog open={showDetalle} onOpenChange={setShowDetalle}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {notificacionSeleccionada && getIconoTipo(notificacionSeleccionada.tipo)}
+              {notificacionSeleccionada?.titulo}
+            </DialogTitle>
+          </DialogHeader>
+
+          {notificacionSeleccionada && (
+            <div className="space-y-4">
+              <div className="flex gap-2">
+                <Badge variant="outline" className="capitalize">
+                  {notificacionSeleccionada.tipo}
+                </Badge>
+                <Badge className={getColorPrioridad(notificacionSeleccionada.prioridad)}>
+                  {notificacionSeleccionada.prioridad}
+                </Badge>
+              </div>
+
+              <div className="p-4 bg-gray-50 rounded-lg">
+                <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                  {notificacionSeleccionada.mensaje}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 text-sm text-gray-600">
+                <Clock className="w-4 h-4" />
+                <span>
+                  Enviado el {new Date(notificacionSeleccionada.fechaCreacion).toLocaleDateString('es-CL')} a las{' '}
+                  {new Date(notificacionSeleccionada.fechaCreacion).toLocaleTimeString('es-CL', { 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                  })}
+                </span>
+              </div>
+
+              <div>
+                <p className="text-sm text-gray-500 mb-2">Canales de envío:</p>
+                <div className="flex gap-2">
+                  {notificacionSeleccionada.canales.map(canal => (
+                    <Badge key={canal} variant="outline" className="flex items-center gap-1">
+                      {getIconoCanal(canal)}
+                      <span className="capitalize">{canal}</span>
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button onClick={() => setShowDetalle(false)}>
+              Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
+// Hook personalizado para obtener el contador de notificaciones no leídas
+export const useNotificacionesNoLeidas = () => {
+  const { user } = useAuth();
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    const updateCount = () => {
+      if (!user) {
+        setCount(0);
+        return;
+      }
+
+      const notificaciones = JSON.parse(localStorage.getItem('notificaciones') || '[]');
+      const noLeidas = notificaciones.filter((n: any) => 
+        n.destinatarios.includes(user.id) && !n.leida.includes(user.id)
+      ).length;
+      
+      setCount(noLeidas);
+    };
+
+    updateCount();
+    
+    // Actualizar cada 10 segundos
+    const interval = setInterval(updateCount, 10000);
+    
+    // Escuchar cambios en localStorage
+    window.addEventListener('storage', updateCount);
+    
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('storage', updateCount);
+    };
+  }, [user]);
+
+  return count;
+};
